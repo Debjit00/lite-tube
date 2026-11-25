@@ -20,19 +20,21 @@ from fastapi import (
     status,
 )
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
+from starlette.concurrency import run_in_threadpool
 
 from app.auth import require_current_user
 from app.config import (
     ALLOWED_THUMBNAIL_EXTENSIONS,
     ALLOWED_VIDEO_EXTENSIONS,
     CATEGORIES,
+    DB_CHUNK_SIZE,
     MAX_THUMBNAIL_BYTES,
     MAX_VIDEO_BYTES,
     UPLOAD_CHUNK_SIZE,
     ensure_directories,
     settings,
 )
-from app.db import db_session
+from app.db import db_session, store_video_chunks
 
 router = APIRouter(prefix="/api", tags=["videos"])
 
@@ -206,7 +208,7 @@ async def _save_or_generate_thumbnail(
     title: str,
     category: str,
     video_path: Path,
-) -> str:
+) -> tuple[str, bytes]:
     ensure_directories()
     thumb_filename = f"{video_id}.png"
     thumb_path = settings.thumbnails_dir / thumb_filename
@@ -233,7 +235,7 @@ async def _save_or_generate_thumbnail(
                 rgb = img.convert("RGB")
                 rgb.thumbnail((1280, 720), Image.Resampling.LANCZOS)
                 rgb.save(thumb_path, format="PNG", optimize=True)
-            return thumb_filename
+            return thumb_filename, thumb_path.read_bytes()
         except (UnidentifiedImageError, OSError, ValueError):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -243,7 +245,7 @@ async def _save_or_generate_thumbnail(
     if not _extract_first_frame_thumbnail(video_path, thumb_path):
         render_fallback_thumbnail(thumb_path, title, category)
 
-    return thumb_filename
+    return thumb_filename, thumb_path.read_bytes()
 
 
 @router.get("/categories")
@@ -341,6 +343,56 @@ def get_video(video_id: str) -> dict[str, Any]:
     }
 
 
+def _persist_uploaded_video_record(
+    *,
+    video_id: str,
+    user_id: int,
+    title: str,
+    description: str,
+    category: str,
+    tags: str,
+    video_filename: str,
+    video_mime: str,
+    file_size: int,
+    duration_seconds: int,
+    thumb_filename: str,
+    thumb_bytes: bytes,
+    video_path: Path,
+    chunk_size: int,
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
+    with db_session() as db:
+        db.execute(
+            """
+            INSERT INTO videos (
+                id, user_id, title, description, category, tags,
+                video_filename, video_mime, file_size, duration_seconds,
+                thumbnail_filename, thumbnail_data, chunk_size, views, created_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s)
+            """,
+            (
+                video_id,
+                user_id,
+                title,
+                description,
+                category,
+                tags,
+                video_filename,
+                video_mime,
+                file_size,
+                duration_seconds,
+                thumb_filename,
+                thumb_bytes,
+                chunk_size,
+                now,
+            ),
+        )
+        store_video_chunks(db, video_id, video_path, chunk_size)
+        row = db.execute(f"{VIDEO_SELECT} WHERE v.id = %s", (video_id,)).fetchone()
+    return serialize_video(row)
+
+
 @router.post("/videos", status_code=status.HTTP_201_CREATED)
 async def upload_video(
     title: str = Form(...),
@@ -384,43 +436,33 @@ async def upload_video(
 
     thumb_filename = ""
     try:
-        thumb_filename = await _save_or_generate_thumbnail(
+        thumb_filename, thumb_bytes = await _save_or_generate_thumbnail(
             thumbnail, video_id, clean_title, clean_category, video_path
         )
-        now = datetime.now(timezone.utc).isoformat()
-        with db_session() as db:
-            db.execute(
-                """
-                INSERT INTO videos (
-                    id, user_id, title, description, category, tags,
-                    video_filename, video_mime, file_size, duration_seconds,
-                    thumbnail_filename, views, created_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s)
-                """,
-                (
-                    video_id,
-                    current_user["id"],
-                    clean_title,
-                    clean_desc,
-                    clean_category,
-                    normalized_tags,
-                    video_filename,
-                    video_mime,
-                    file_size,
-                    safe_duration,
-                    thumb_filename,
-                    now,
-                ),
-            )
-            row = db.execute(f"{VIDEO_SELECT} WHERE v.id = %s", (video_id,)).fetchone()
+        serialized = await run_in_threadpool(
+            _persist_uploaded_video_record,
+            video_id=video_id,
+            user_id=current_user["id"],
+            title=clean_title,
+            description=clean_desc,
+            category=clean_category,
+            tags=normalized_tags,
+            video_filename=video_filename,
+            video_mime=video_mime,
+            file_size=file_size,
+            duration_seconds=safe_duration,
+            thumb_filename=thumb_filename,
+            thumb_bytes=thumb_bytes,
+            video_path=video_path,
+            chunk_size=DB_CHUNK_SIZE,
+        )
     except Exception:
         video_path.unlink(missing_ok=True)
         if thumb_filename:
             (settings.thumbnails_dir / thumb_filename).unlink(missing_ok=True)
         raise
 
-    return {"video": serialize_video(row)}
+    return {"video": serialized}
 
 
 @router.post("/videos/{video_id}/view")

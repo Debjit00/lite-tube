@@ -12,8 +12,8 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from app.auth import hash_password, pick_avatar_color
-from app.config import ensure_directories, settings
-from app.db import db_session
+from app.config import DB_CHUNK_SIZE, ensure_directories, settings
+from app.db import db_session, store_video_chunks
 
 SEED_CHANNELS = [
     ("techbytes", "TechBytes"),
@@ -247,68 +247,103 @@ def _generate_seed_clip(
 
 
 def seed_if_empty() -> None:
-    """Populate initial demo channels and clips when database is empty."""
+    """Populate initial demo channels and clips, and backfill any missing DB media blobs."""
     if os.environ.get("LITETUBE_SKIP_SEED") == "1":
         return
 
     ensure_directories()
     with db_session() as db:
         user_count = db.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()["cnt"]
-        if user_count > 0:
+        if user_count == 0:
+            now = datetime.now(timezone.utc)
+            password_hash = hash_password("demo1234")
+            user_ids: dict[str, int] = {}
+
+            for username, display_name in SEED_CHANNELS:
+                cur = db.execute(
+                    """
+                    INSERT INTO users (username, display_name, password_hash, avatar_color, created_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        username,
+                        display_name,
+                        password_hash,
+                        pick_avatar_color(username),
+                        (now - timedelta(days=10)).isoformat(),
+                    ),
+                )
+                user_ids[username] = int(cur.lastrowid)
+
+            for spec in SEED_VIDEOS:
+                vid_id = str(spec["id"])
+                video_filename = f"{vid_id}.webm"
+                thumb_filename = f"{vid_id}.png"
+                video_path = settings.videos_dir / video_filename
+                thumb_path = settings.thumbnails_dir / thumb_filename
+
+                duration = _generate_seed_clip(video_path, thumb_path, spec)
+                file_size = video_path.stat().st_size
+                thumb_bytes = thumb_path.read_bytes()
+                created_at = (now - timedelta(hours=int(spec["hours_ago"]))).isoformat()
+
+                db.execute(
+                    """
+                    INSERT INTO videos (
+                        id, user_id, title, description, category, tags,
+                        video_filename, video_mime, file_size, duration_seconds,
+                        thumbnail_filename, thumbnail_data, chunk_size, views, created_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'video/webm', %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        vid_id,
+                        user_ids[str(spec["username"])],
+                        str(spec["title"]),
+                        str(spec["description"]),
+                        str(spec["category"]),
+                        str(spec["tags"]),
+                        video_filename,
+                        file_size,
+                        duration,
+                        thumb_filename,
+                        thumb_bytes,
+                        DB_CHUNK_SIZE,
+                        int(spec["views"]),
+                        created_at,
+                    ),
+                )
+                store_video_chunks(db, vid_id, video_path, DB_CHUNK_SIZE)
             return
 
-        now = datetime.now(timezone.utc)
-        password_hash = hash_password("demo1234")
-        user_ids: dict[str, int] = {}
-
-        for username, display_name in SEED_CHANNELS:
-            cur = db.execute(
-                """
-                INSERT INTO users (username, display_name, password_hash, avatar_color, created_at)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                (
-                    username,
-                    display_name,
-                    password_hash,
-                    pick_avatar_color(username),
-                    (now - timedelta(days=10)).isoformat(),
-                ),
-            )
-            user_ids[username] = int(cur.lastrowid)
-
+        # Backfill existing seeded rows if migrated from pre-BLOB schema
         for spec in SEED_VIDEOS:
             vid_id = str(spec["id"])
-            video_filename = f"{vid_id}.webm"
-            thumb_filename = f"{vid_id}.png"
-            video_path = settings.videos_dir / video_filename
-            thumb_path = settings.thumbnails_dir / thumb_filename
+            row = db.execute(
+                "SELECT id, thumbnail_data FROM videos WHERE id = %s", (vid_id,)
+            ).fetchone()
+            if row is None:
+                continue
+            cnt = db.execute(
+                "SELECT COUNT(*) AS cnt FROM video_chunks WHERE video_id = %s",
+                (vid_id,),
+            ).fetchone()["cnt"]
+            if row["thumbnail_data"] is not None and cnt > 0:
+                continue
 
-            duration = _generate_seed_clip(video_path, thumb_path, spec)
+            video_path = settings.videos_dir / f"{vid_id}.webm"
+            thumb_path = settings.thumbnails_dir / f"{vid_id}.png"
+            if not video_path.is_file() or not thumb_path.is_file():
+                _generate_seed_clip(video_path, thumb_path, spec)
+
             file_size = video_path.stat().st_size
-            created_at = (now - timedelta(hours=int(spec["hours_ago"]))).isoformat()
-
+            thumb_bytes = thumb_path.read_bytes()
             db.execute(
                 """
-                INSERT INTO videos (
-                    id, user_id, title, description, category, tags,
-                    video_filename, video_mime, file_size, duration_seconds,
-                    thumbnail_filename, views, created_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 'video/webm', %s, %s, %s, %s, %s)
+                UPDATE videos
+                SET file_size = %s, thumbnail_data = %s, chunk_size = %s
+                WHERE id = %s
                 """,
-                (
-                    vid_id,
-                    user_ids[str(spec["username"])],
-                    str(spec["title"]),
-                    str(spec["description"]),
-                    str(spec["category"]),
-                    str(spec["tags"]),
-                    video_filename,
-                    file_size,
-                    duration,
-                    thumb_filename,
-                    int(spec["views"]),
-                    created_at,
-                ),
+                (file_size, thumb_bytes, DB_CHUNK_SIZE, vid_id),
             )
+            store_video_chunks(db, vid_id, video_path, DB_CHUNK_SIZE)

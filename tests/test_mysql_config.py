@@ -191,6 +191,9 @@ def test_init_db_creates_missing_mysql_database_on_1049(
             if "CREATE DATABASE IF NOT EXISTS `abc`" in sql:
                 db_created["done"] = True
 
+        def fetchall(self) -> list[dict[str, Any]]:
+            return []
+
     class FakeConn:
         def cursor(self) -> FakeCursor:
             return FakeCursor()

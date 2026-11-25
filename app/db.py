@@ -9,6 +9,7 @@ import sqlite3
 import ssl
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterator, Sequence
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -16,7 +17,7 @@ import pymysql
 import pymysql.cursors
 import pymysql.err
 
-from app.config import BASE_DIR, ensure_directories
+from app.config import BASE_DIR, DB_CHUNK_SIZE, ensure_directories
 
 IntegrityError = (sqlite3.IntegrityError, pymysql.err.IntegrityError)
 SAFE_DB_NAME_RE = re.compile(r"^[a-zA-Z0-9_$-]{1,64}$")
@@ -66,12 +67,23 @@ MYSQL_SCHEMA_STATEMENTS = (
         file_size BIGINT UNSIGNED NOT NULL,
         duration_seconds INT UNSIGNED NOT NULL DEFAULT 0,
         thumbnail_filename VARCHAR(128) NOT NULL,
+        thumbnail_data MEDIUMBLOB NULL,
+        chunk_size INT UNSIGNED NOT NULL DEFAULT 1048576,
         views BIGINT UNSIGNED NOT NULL DEFAULT 0,
         created_at VARCHAR(64) NOT NULL,
         INDEX idx_videos_created_at (created_at),
         INDEX idx_videos_category (category),
         INDEX idx_videos_user_id (user_id),
         CONSTRAINT fk_videos_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS video_chunks (
+        video_id VARCHAR(32) NOT NULL,
+        chunk_index INT UNSIGNED NOT NULL,
+        data MEDIUMBLOB NOT NULL,
+        PRIMARY KEY (video_id, chunk_index),
+        CONSTRAINT fk_video_chunks_video FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
 )
@@ -98,8 +110,17 @@ CREATE TABLE IF NOT EXISTS videos (
     file_size INTEGER NOT NULL,
     duration_seconds INTEGER NOT NULL DEFAULT 0,
     thumbnail_filename TEXT NOT NULL,
+    thumbnail_data BLOB,
+    chunk_size INTEGER NOT NULL DEFAULT 1048576,
     views INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS video_chunks (
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL,
+    data BLOB NOT NULL,
+    PRIMARY KEY (video_id, chunk_index)
 );
 
 CREATE INDEX IF NOT EXISTS idx_videos_created_at ON videos(created_at);
@@ -425,6 +446,45 @@ def _ensure_mysql_database_exists(config: DatabaseConfig) -> None:
         conn.close()
 
 
+def _ensure_mysql_media_columns(db: DatabaseSession) -> None:
+    """Safely migrate pre-existing MySQL videos tables to store media columns."""
+    rows = db.execute(
+        """
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'videos'
+        """
+    ).fetchall()
+    existing = {r["COLUMN_NAME"] for r in rows}
+    if "thumbnail_data" not in existing:
+        db.execute("ALTER TABLE videos ADD COLUMN thumbnail_data MEDIUMBLOB NULL")
+    if "chunk_size" not in existing:
+        db.execute(
+            f"ALTER TABLE videos ADD COLUMN chunk_size INT UNSIGNED NOT NULL DEFAULT {DB_CHUNK_SIZE}"
+        )
+
+
+def store_video_chunks(
+    db: DatabaseSession,
+    video_id: str,
+    video_path: Path,
+    chunk_size: int = DB_CHUNK_SIZE,
+) -> None:
+    """Read a video file and persist its binary contents in fixed-size DB chunks."""
+    db.execute("DELETE FROM video_chunks WHERE video_id = %s", (video_id,))
+    with video_path.open("rb") as fh:
+        idx = 0
+        while True:
+            chunk = fh.read(chunk_size)
+            if not chunk:
+                break
+            db.execute(
+                "INSERT INTO video_chunks (video_id, chunk_index, data) VALUES (%s, %s, %s)",
+                (video_id, idx, chunk),
+            )
+            idx += 1
+
+
 def init_db() -> None:
     """Create media directories and initialize MySQL (or SQLite test) tables."""
     ensure_directories()
@@ -435,6 +495,7 @@ def init_db() -> None:
             with db_session() as db:
                 for ddl in MYSQL_SCHEMA_STATEMENTS:
                     db.execute(ddl)
+                _ensure_mysql_media_columns(db)
         except pymysql.err.OperationalError as exc:
             if exc.args and exc.args[0] == 1049:
                 reset_db_pool()
@@ -442,6 +503,7 @@ def init_db() -> None:
                 with db_session() as db:
                     for ddl in MYSQL_SCHEMA_STATEMENTS:
                         db.execute(ddl)
+                    _ensure_mysql_media_columns(db)
                 return
             raise
         return
