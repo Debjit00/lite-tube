@@ -130,6 +130,7 @@ def test_upload_search_filter_views_and_owner_delete(client: TestClient) -> None
 def test_seed_generates_playable_clips_idempotently(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'seed_test.db'}")
     monkeypatch.setenv("LITETUBE_SKIP_SEED", "0")
     monkeypatch.setenv("LITETUBE_SECRET_KEY", "seed-test-secret")
     set_data_dir(tmp_path)

@@ -1,4 +1,4 @@
-"""Application configuration, paths, and upload/auth constants."""
+"""Application configuration, environment loading, paths, and constants."""
 
 from __future__ import annotations
 
@@ -7,7 +7,11 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env", override=False)
+
 TEMPLATES_DIR = BASE_DIR / "app" / "templates"
 STATIC_DIR = BASE_DIR / "app" / "static"
 
@@ -44,10 +48,6 @@ class Settings:
     """Runtime directory configuration (mutable for isolated test runs)."""
 
     data_dir: Path
-
-    @property
-    def db_path(self) -> Path:
-        return self.data_dir / "app.db"
 
     @property
     def videos_dir(self) -> Path:

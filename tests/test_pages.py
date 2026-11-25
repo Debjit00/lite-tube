@@ -12,6 +12,10 @@ from app.config import settings
 
 
 def test_html_pages_and_static_assets(client: TestClient) -> None:
+    health = client.get("/api/health")
+    assert health.status_code == 200
+    assert health.json()["status"] == "ok"
+
     for path in ("/", "/upload", "/watch/nonexistent"):
         res = client.get(path)
         assert res.status_code == 200

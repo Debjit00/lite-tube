@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.config import CATEGORIES, STATIC_DIR, TEMPLATES_DIR
-from app.db import init_db
+from app.db import check_db_health, init_db, reset_db_pool
 from app.routes.auth_routes import router as auth_router
 from app.routes.media_routes import router as media_router
 from app.routes.video_routes import router as video_router
@@ -20,10 +20,13 @@ from app.seed import seed_if_empty
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Initialize SQLite schema and seed demo data if empty."""
+    """Initialize database schema, seed demo data if empty, and close pool on exit."""
     init_db()
     seed_if_empty()
-    yield
+    try:
+        yield
+    finally:
+        reset_db_pool()
 
 
 app = FastAPI(title="LiteTube", version="1.0.0", lifespan=lifespan)
@@ -33,6 +36,12 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.include_router(auth_router)
 app.include_router(video_router)
 app.include_router(media_router)
+
+
+@app.get("/api/health")
+def health() -> dict[str, str]:
+    """Verify database connectivity."""
+    return check_db_health()
 
 
 @app.get("/", response_class=HTMLResponse)

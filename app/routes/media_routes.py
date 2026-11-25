@@ -78,9 +78,9 @@ def _resolve_safe_path(base_dir: Path, filename: str) -> Path:
 @router.api_route("/videos/{video_id}", methods=["GET", "HEAD"])
 def stream_video(video_id: str, request: Request) -> Response:
     """Stream a stored video with full HTTP 206 Partial Content Range support."""
-    with db_session() as conn:
-        row = conn.execute(
-            "SELECT video_filename, video_mime FROM videos WHERE id = ?",
+    with db_session() as db:
+        row = db.execute(
+            "SELECT video_filename, video_mime FROM videos WHERE id = %s",
             (video_id,),
         ).fetchone()
 

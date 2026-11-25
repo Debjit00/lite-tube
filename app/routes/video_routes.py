@@ -60,7 +60,7 @@ JOIN users u ON u.id = v.user_id
 
 
 def serialize_video(row: Any) -> dict[str, Any]:
-    """Convert a joined video+user SQLite row into the API response shape."""
+    """Convert a joined video+user database row into the API response shape."""
     raw_tags = row["tags"] or ""
     tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
     return {
@@ -86,7 +86,7 @@ def serialize_video(row: Any) -> dict[str, Any]:
 
 
 def _escape_like(term: str) -> str:
-    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return term.replace("|", "||").replace("%", "|%").replace("_", "|_")
 
 
 def _is_valid_video_magic(header: bytes, ext: str) -> bool:
@@ -270,39 +270,39 @@ def list_videos(
         pattern = f"%{_escape_like(search)}%"
         where_clauses.append(
             """(
-                v.title LIKE ? ESCAPE '\\'
-                OR v.description LIKE ? ESCAPE '\\'
-                OR v.tags LIKE ? ESCAPE '\\'
-                OR u.display_name LIKE ? ESCAPE '\\'
-                OR u.username LIKE ? ESCAPE '\\'
+                v.title LIKE %s ESCAPE '|'
+                OR v.description LIKE %s ESCAPE '|'
+                OR v.tags LIKE %s ESCAPE '|'
+                OR u.display_name LIKE %s ESCAPE '|'
+                OR u.username LIKE %s ESCAPE '|'
             )"""
         )
         params.extend([pattern, pattern, pattern, pattern, pattern])
 
     cat = category.strip()
     if cat and cat.lower() != "all":
-        where_clauses.append("LOWER(v.category) = LOWER(?)")
+        where_clauses.append("LOWER(v.category) = LOWER(%s)")
         params.append(cat)
 
     chan = channel.strip()
     if chan:
-        where_clauses.append("u.username = ?")
+        where_clauses.append("u.username = %s")
         params.append(chan)
 
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     order_sql = (
-        "ORDER BY v.views DESC, v.created_at DESC, v.rowid DESC"
+        "ORDER BY v.views DESC, v.created_at DESC, v.id DESC"
         if sort == "views"
-        else "ORDER BY v.created_at DESC, v.rowid DESC"
+        else "ORDER BY v.created_at DESC, v.id DESC"
     )
 
-    with db_session() as conn:
-        total_row = conn.execute(
+    with db_session() as db:
+        total_row = db.execute(
             f"SELECT COUNT(*) AS cnt FROM videos v JOIN users u ON u.id = v.user_id {where_sql}",
             params,
         ).fetchone()
-        rows = conn.execute(
-            f"{VIDEO_SELECT} {where_sql} {order_sql} LIMIT ? OFFSET ?",
+        rows = db.execute(
+            f"{VIDEO_SELECT} {where_sql} {order_sql} LIMIT %s OFFSET %s",
             [*params, limit, offset],
         ).fetchall()
 
@@ -315,19 +315,19 @@ def list_videos(
 @router.get("/videos/{video_id}")
 def get_video(video_id: str) -> dict[str, Any]:
     """Fetch single video details alongside ranked 'Up Next' related videos."""
-    with db_session() as conn:
-        row = conn.execute(f"{VIDEO_SELECT} WHERE v.id = ?", (video_id,)).fetchone()
+    with db_session() as db:
+        row = db.execute(f"{VIDEO_SELECT} WHERE v.id = %s", (video_id,)).fetchone()
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Video not found."
             )
 
-        related_rows = conn.execute(
+        related_rows = db.execute(
             f"""
             {VIDEO_SELECT}
-            WHERE v.id != ?
+            WHERE v.id != %s
             ORDER BY
-                CASE WHEN v.category = ? THEN 0 ELSE 1 END,
+                CASE WHEN v.category = %s THEN 0 ELSE 1 END,
                 v.views DESC,
                 v.created_at DESC
             LIMIT 10
@@ -369,7 +369,11 @@ async def upload_video(
         )
 
     normalized_tags = ",".join(
-        [t.strip().lstrip("#").lower()[:24] for t in tags.split(",") if t.strip().lstrip("#")][:10]
+        [
+            t.strip().lstrip("#").lower()[:24]
+            for t in tags.split(",")
+            if t.strip().lstrip("#")
+        ][:10]
     )
     safe_duration = max(0, min(int(duration_seconds), 86400))
 
@@ -384,15 +388,15 @@ async def upload_video(
             thumbnail, video_id, clean_title, clean_category, video_path
         )
         now = datetime.now(timezone.utc).isoformat()
-        with db_session() as conn:
-            conn.execute(
+        with db_session() as db:
+            db.execute(
                 """
                 INSERT INTO videos (
                     id, user_id, title, description, category, tags,
                     video_filename, video_mime, file_size, duration_seconds,
                     thumbnail_filename, views, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s)
                 """,
                 (
                     video_id,
@@ -409,7 +413,7 @@ async def upload_video(
                     now,
                 ),
             )
-            row = conn.execute(f"{VIDEO_SELECT} WHERE v.id = ?", (video_id,)).fetchone()
+            row = db.execute(f"{VIDEO_SELECT} WHERE v.id = %s", (video_id,)).fetchone()
     except Exception:
         video_path.unlink(missing_ok=True)
         if thumb_filename:
@@ -422,17 +426,17 @@ async def upload_video(
 @router.post("/videos/{video_id}/view")
 def record_view(video_id: str) -> dict[str, int]:
     """Increment a video's view counter by 1."""
-    with db_session() as conn:
-        cursor = conn.execute(
-            "UPDATE videos SET views = views + 1 WHERE id = ?",
+    with db_session() as db:
+        cursor = db.execute(
+            "UPDATE videos SET views = views + 1 WHERE id = %s",
             (video_id,),
         )
         if cursor.rowcount == 0:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Video not found."
             )
-        row = conn.execute(
-            "SELECT views FROM videos WHERE id = ?", (video_id,)
+        row = db.execute(
+            "SELECT views FROM videos WHERE id = %s", (video_id,)
         ).fetchone()
     return {"views": row["views"]}
 
@@ -443,9 +447,9 @@ def delete_video(
     current_user: dict[str, Any] = Depends(require_current_user),
 ) -> dict[str, Any]:
     """Delete a video owned by the current authenticated user."""
-    with db_session() as conn:
-        row = conn.execute(
-            "SELECT id, user_id, video_filename, thumbnail_filename FROM videos WHERE id = ?",
+    with db_session() as db:
+        row = db.execute(
+            "SELECT id, user_id, video_filename, thumbnail_filename FROM videos WHERE id = %s",
             (video_id,),
         ).fetchone()
         if row is None:
@@ -457,7 +461,7 @@ def delete_video(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only delete videos uploaded by your channel.",
             )
-        conn.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+        db.execute("DELETE FROM videos WHERE id = %s", (video_id,))
 
     (settings.videos_dir / row["video_filename"]).unlink(missing_ok=True)
     (settings.thumbnails_dir / row["thumbnail_filename"]).unlink(missing_ok=True)

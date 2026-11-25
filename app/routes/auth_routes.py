@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
@@ -19,7 +18,7 @@ from app.auth import (
     verify_password,
 )
 from app.config import SESSION_COOKIE_NAME, SESSION_TTL_SECONDS
-from app.db import db_session
+from app.db import IntegrityError, db_session
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -67,22 +66,22 @@ def register(payload: RegisterPayload, response: Response) -> dict[str, Any]:
     password_hash = hash_password(payload.password)
     avatar_color = pick_avatar_color(username)
 
-    with db_session() as conn:
+    with db_session() as db:
         try:
-            cursor = conn.execute(
+            cursor = db.execute(
                 """
                 INSERT INTO users (username, display_name, password_hash, avatar_color, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s)
                 """,
                 (username, display_name, password_hash, avatar_color, now),
             )
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="That username is already taken.",
             )
-        row = conn.execute(
-            "SELECT id, username, display_name, avatar_color, created_at FROM users WHERE id = ?",
+        row = db.execute(
+            "SELECT id, username, display_name, avatar_color, created_at FROM users WHERE id = %s",
             (cursor.lastrowid,),
         ).fetchone()
 
@@ -100,12 +99,12 @@ def login(payload: LoginPayload, response: Response) -> dict[str, Any]:
             detail="Username and password are required.",
         )
 
-    with db_session() as conn:
-        row = conn.execute(
+    with db_session() as db:
+        row = db.execute(
             """
             SELECT id, username, display_name, password_hash, avatar_color, created_at
             FROM users
-            WHERE username = ?
+            WHERE username = %s
             """,
             (username,),
         ).fetchone()

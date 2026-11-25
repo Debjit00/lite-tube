@@ -93,7 +93,7 @@ def pick_avatar_color(username: str) -> str:
 
 
 def serialize_user(row: Any) -> dict[str, Any]:
-    """Convert a SQLite user row to a public JSON-safe dictionary."""
+    """Convert a database user row to a public JSON-safe dictionary."""
     return {
         "id": row["id"],
         "username": row["username"],
@@ -110,9 +110,9 @@ def get_current_user_optional(request: Request) -> dict[str, Any] | None:
     if user_id is None:
         return None
 
-    with db_session() as conn:
-        row = conn.execute(
-            "SELECT id, username, display_name, avatar_color, created_at FROM users WHERE id = ?",
+    with db_session() as db:
+        row = db.execute(
+            "SELECT id, username, display_name, avatar_color, created_at FROM users WHERE id = %s",
             (user_id,),
         ).fetchone()
     return serialize_user(row) if row else None

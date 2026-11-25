@@ -28,7 +28,7 @@ SEED_VIDEOS = [
         "title": "Neon Orbit: Building a Lightweight Streaming Engine",
         "description": (
             "Visual walk-through of how LiteTube serves chunked video over HTTP 206 "
-            "byte-range requests using FastAPI and SQLite WAL mode."
+            "byte-range requests using FastAPI and MySQL."
         ),
         "category": "Tech",
         "tags": "python,fastapi,streaming,architecture",
@@ -231,7 +231,6 @@ def _generate_seed_clip(
     finally:
         writer.release()
 
-    # Build crisp thumbnail from middle frame with a subtle title gradient bar
     if mid_frame is None:
         mid_frame = _draw_frame(theme, 0, total_frames)
 
@@ -253,8 +252,8 @@ def seed_if_empty() -> None:
         return
 
     ensure_directories()
-    with db_session() as conn:
-        user_count = conn.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()["cnt"]
+    with db_session() as db:
+        user_count = db.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()["cnt"]
         if user_count > 0:
             return
 
@@ -263,10 +262,10 @@ def seed_if_empty() -> None:
         user_ids: dict[str, int] = {}
 
         for username, display_name in SEED_CHANNELS:
-            cur = conn.execute(
+            cur = db.execute(
                 """
                 INSERT INTO users (username, display_name, password_hash, avatar_color, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s)
                 """,
                 (
                     username,
@@ -289,14 +288,14 @@ def seed_if_empty() -> None:
             file_size = video_path.stat().st_size
             created_at = (now - timedelta(hours=int(spec["hours_ago"]))).isoformat()
 
-            conn.execute(
+            db.execute(
                 """
                 INSERT INTO videos (
                     id, user_id, title, description, category, tags,
                     video_filename, video_mime, file_size, duration_seconds,
                     thumbnail_filename, views, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'video/webm', ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'video/webm', %s, %s, %s, %s, %s)
                 """,
                 (
                     vid_id,
