@@ -5,6 +5,7 @@ from __future__ import annotations
 import ssl
 from typing import Any
 
+import pymysql.err
 import pytest
 
 from app.config import set_data_dir
@@ -159,5 +160,66 @@ def test_mysql_pool_and_health_with_mocked_pymysql(
         assert ping_calls == [True]
         assert any("CREATE TABLE IF NOT EXISTS users" in s for s in executed_sql)
         assert any("SELECT 1" == s for s in executed_sql)
+    finally:
+        reset_db_pool()
+
+
+def test_init_db_creates_missing_mysql_database_on_1049(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    _clear_db_env(monkeypatch)
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "mysql://user:pass@remote.mysql.cloud:3306/abc?ssl-mode=REQUIRED",
+    )
+    set_data_dir(tmp_path)
+    reset_db_pool()
+
+    executed_sql: list[str] = []
+    connect_dbs: list[str | None] = []
+    db_created = {"done": False}
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
+            executed_sql.append(sql.strip())
+            if "CREATE DATABASE IF NOT EXISTS `abc`" in sql:
+                db_created["done"] = True
+
+    class FakeConn:
+        def cursor(self) -> FakeCursor:
+            return FakeCursor()
+
+        def ping(self, reconnect: bool = False) -> None:
+            pass
+
+        def commit(self) -> None:
+            pass
+
+        def rollback(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    def fake_connect(**kwargs: Any) -> FakeConn:
+        target_db = kwargs.get("database")
+        connect_dbs.append(target_db)
+        if target_db == "abc" and not db_created["done"]:
+            raise pymysql.err.OperationalError(1049, "Unknown database 'abc'")
+        return FakeConn()
+
+    monkeypatch.setattr("app.db.pymysql.connect", fake_connect)
+
+    try:
+        init_db()
+        assert connect_dbs == ["abc", None, "abc"]
+        assert any("CREATE DATABASE IF NOT EXISTS `abc`" in s for s in executed_sql)
+        assert any("CREATE TABLE IF NOT EXISTS videos" in s for s in executed_sql)
     finally:
         reset_db_pool()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import sqlite3
 import ssl
 from contextlib import contextmanager
@@ -18,6 +19,7 @@ import pymysql.err
 from app.config import BASE_DIR, ensure_directories
 
 IntegrityError = (sqlite3.IntegrityError, pymysql.err.IntegrityError)
+SAFE_DB_NAME_RE = re.compile(r"^[a-zA-Z0-9_$-]{1,64}$")
 
 
 class DatabaseConfigError(RuntimeError):
@@ -399,15 +401,49 @@ def db_session() -> Iterator[DatabaseSession]:
         conn.close()
 
 
+def _ensure_mysql_database_exists(config: DatabaseConfig) -> None:
+    """Create the target MySQL database if it does not exist yet."""
+    if not SAFE_DB_NAME_RE.match(config.database):
+        raise DatabaseConfigError(f"Unsafe MySQL database name: {config.database!r}")
+    conn = pymysql.connect(
+        host=config.host,
+        port=config.port,
+        user=config.user,
+        password=config.password,
+        charset="utf8mb4",
+        autocommit=True,
+        connect_timeout=10,
+        ssl=build_mysql_ssl_context(config),
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"CREATE DATABASE IF NOT EXISTS `{config.database}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+            )
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
     """Create media directories and initialize MySQL (or SQLite test) tables."""
     ensure_directories()
     config = parse_database_config()
 
     if config.backend == "mysql":
-        with db_session() as db:
-            for ddl in MYSQL_SCHEMA_STATEMENTS:
-                db.execute(ddl)
+        try:
+            with db_session() as db:
+                for ddl in MYSQL_SCHEMA_STATEMENTS:
+                    db.execute(ddl)
+        except pymysql.err.OperationalError as exc:
+            if exc.args and exc.args[0] == 1049:
+                reset_db_pool()
+                _ensure_mysql_database_exists(config)
+                with db_session() as db:
+                    for ddl in MYSQL_SCHEMA_STATEMENTS:
+                        db.execute(ddl)
+                return
+            raise
         return
 
     conn = sqlite3.connect(config.sqlite_path, check_same_thread=False)
