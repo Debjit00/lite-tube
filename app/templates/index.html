@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}LiteTube — Watch & Share Videos{% endblock %}
+
+{% block content %}
+<section class="feed-toolbar">
+    <div id="categoryChips" class="category-chips" role="tablist" aria-label="Video categories">
+        {% for cat in categories %}
+        <button class="chip {% if cat == 'All' %}active{% endif %}" type="button" data-category="{{ cat }}">{{ cat }}</button>
+        {% endfor %}
+    </div>
+
+    <select id="sortSelect" class="sort-select" aria-label="Sort videos">
+        <option value="newest">Newest first</option>
+        <option value="views">Most viewed</option>
+    </select>
+</section>
+
+<div id="activeFilterBanner" class="filter-banner hidden">
+    <span id="activeFilterText"></span>
+    <button id="clearFiltersBtn" class="btn btn-secondary" style="padding: 5px 12px;" type="button">Clear filters</button>
+</div>
+
+<section id="videoGrid" class="video-grid" aria-live="polite"></section>
+
+<div id="emptyState" class="empty-state hidden">
+    <h3>No videos match your filter</h3>
+    <p>Try clearing your search terms, picking another category, or upload a new clip.</p>
+    <a class="btn btn-primary" href="/upload">Upload a Video</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/home.js"></script>
+{% endblock %}

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Video — LiteTube{% endblock %}
+
+{% block content %}
+<div class="upload-container">
+    <div class="page-header">
+        <h1>Upload Video</h1>
+        <p>Publish an MP4 or WebM clip with an auto-captured or custom 16:9 thumbnail.</p>
+    </div>
+
+    <div id="uploadAuthGate" class="empty-state hidden">
+        <h3>Sign in to upload videos</h3>
+        <p>Create a free LiteTube account or sign in with a demo channel to publish clips.</p>
+        <button id="uploadSignInBtn" class="btn btn-primary" type="button">Sign in / Create account</button>
+    </div>
+
+    <form id="uploadStudio" class="upload-grid hidden">
+        <div class="panel-card">
+            <div id="videoDropzone" class="dropzone" tabindex="0" role="button" aria-label="Select video file">
+                <input id="videoFileInput" type="file" accept=".mp4,.webm,video/mp4,video/webm" class="hidden" />
+                <div class="dropzone-title">Drag &amp; drop your video here</div>
+                <div id="videoFileLabel" class="dropzone-sub">MP4 or WebM up to 100 MB &bull; Click to browse</div>
+            </div>
+
+            <div id="previewBox" class="preview-box hidden">
+                <video id="previewPlayer" class="preview-video" controls muted playsinline></video>
+                <div class="thumb-preview-row">
+                    <img id="thumbPreviewImg" class="thumb-preview-img" alt="Video thumbnail preview" />
+                    <div>
+                        <div style="font-weight: 600; margin-bottom: 6px;">Thumbnail Preview</div>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <label class="btn btn-secondary" style="padding: 6px 12px; cursor: pointer;">
+                                Custom image
+                                <input id="customThumbInput" type="file" accept=".png,.jpg,.jpeg,.webp,image/*" class="hidden" />
+                            </label>
+                            <button id="resetThumbBtn" class="btn btn-secondary hidden" style="padding: 6px 12px;" type="button">Use auto-capture</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div id="uploadError" class="form-error hidden"></div>
+
+            <div class="form-field">
+                <label for="videoTitleInput">Title *</label>
+                <input id="videoTitleInput" class="form-input" type="text" required maxlength="120" placeholder="Give your video a clear title" />
+            </div>
+
+            <div class="form-field">
+                <label for="videoCategorySelect">Category</label>
+                <select id="videoCategorySelect" class="form-select">
+                    {% for cat in categories %}
+                    <option value="{{ cat }}">{{ cat }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-field">
+                <label for="videoTagsInput">Tags (comma-separated)</label>
+                <input id="videoTagsInput" class="form-input" type="text" placeholder="e.g. python, demo, music" />
+            </div>
+
+            <div class="form-field">
+                <label for="videoDescInput">Description</label>
+                <textarea id="videoDescInput" class="form-textarea" rows="5" maxlength="5000" placeholder="Tell viewers about your video..."></textarea>
+            </div>
+
+            <div id="uploadProgressWrap" class="progress-wrap hidden">
+                <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px;">
+                    <span>Uploading...</span>
+                    <span id="uploadProgressPct">0%</span>
+                </div>
+                <div class="progress-track">
+                    <div id="uploadProgressBar" class="progress-fill"></div>
+                </div>
+            </div>
+
+            <button id="publishBtn" class="btn btn-primary" style="width: 100%;" type="submit" disabled>Publish Video</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/upload.js"></script>
+{% endblock %}

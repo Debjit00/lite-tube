@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}LiteTube{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+    <header class="top-bar">
+        <div class="top-bar-left">
+            <button id="sidebarToggle" class="icon-btn" type="button" aria-label="Toggle sidebar">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z" />
+                </svg>
+            </button>
+            <a class="brand-link" href="/">
+                <span class="brand-badge" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                </span>
+                <span>LiteTube</span>
+            </a>
+        </div>
+
+        <form id="headerSearchForm" class="search-form" role="search">
+            <input
+                id="searchInput"
+                class="search-input"
+                type="search"
+                name="q"
+                placeholder="Search videos, tags, or channels..."
+                autocomplete="off"
+            />
+            <button id="searchClearBtn" class="search-clear-btn hidden" type="button" aria-label="Clear search">&times;</button>
+            <button class="search-submit-btn" type="submit" aria-label="Search">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                </svg>
+            </button>
+        </form>
+
+        <div class="top-bar-right">
+            <a class="btn btn-secondary" href="/upload">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+                </svg>
+                <span class="btn-label-hide-sm">Upload</span>
+            </a>
+            <div id="authArea">
+                <button id="openSignInBtn" class="btn btn-outline-blue" type="button">Sign in</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="app-shell">
+        <aside id="sidebar" class="sidebar" aria-label="Primary navigation">
+            <nav class="sidebar-section">
+                <a class="sidebar-link {% if active_page == 'home' %}active{% endif %}" href="/" data-nav="home">
+                    <span>Home</span>
+                </a>
+                <a class="sidebar-link" href="/?sort=views" data-nav="trending">
+                    <span>Most Viewed</span>
+                </a>
+                <a id="sidebarMyUploads" class="sidebar-link hidden" href="/" data-nav="my-uploads">
+                    <span>My Uploads</span>
+                </a>
+                <a class="sidebar-link {% if active_page == 'upload' %}active{% endif %}" href="/upload" data-nav="upload">
+                    <span>Upload Video</span>
+                </a>
+            </nav>
+
+            <nav class="sidebar-section">
+                <div class="sidebar-heading">Categories</div>
+                {% for cat in categories %}
+                <a class="sidebar-link" href="/?category={{ cat | urlencode }}" data-sidebar-category="{{ cat }}">
+                    <span>{{ cat }}</span>
+                </a>
+                {% endfor %}
+            </nav>
+
+            <div class="sidebar-footer">
+                LiteTube &bull; Lightweight FastAPI + SQLite Video Platform
+            </div>
+        </aside>
+        <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
+
+        <main class="main-content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <div id="authModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2 id="authModalTitle">Sign in to LiteTube</h2>
+                <button id="closeAuthModalBtn" class="icon-btn" type="button" aria-label="Close modal">&times;</button>
+            </div>
+
+            <div class="tab-row">
+                <button id="tabLoginBtn" class="tab-btn active" type="button">Sign in</button>
+                <button id="tabRegisterBtn" class="tab-btn" type="button">Create account</button>
+            </div>
+
+            <form id="authForm">
+                <div id="authError" class="form-error hidden"></div>
+
+                <div class="form-field">
+                    <label for="authUsername">Username</label>
+                    <input id="authUsername" class="form-input" type="text" required minlength="3" maxlength="32" placeholder="e.g. techbytes" />
+                </div>
+
+                <div id="authDisplayNameGroup" class="form-field hidden">
+                    <label for="authDisplayName">Channel Display Name</label>
+                    <input id="authDisplayName" class="form-input" type="text" maxlength="48" placeholder="Optional display name" />
+                </div>
+
+                <div class="form-field">
+                    <label for="authPassword">Password</label>
+                    <input id="authPassword" class="form-input" type="password" required minlength="6" placeholder="Minimum 6 characters" />
+                </div>
+
+                <button id="authSubmitBtn" class="btn btn-primary" style="width: 100%;" type="submit">Sign in</button>
+            </form>
+
+            <div id="demoCredsHint" class="demo-hint">
+                <span>Demo account: <strong>techbytes</strong> / <strong>demo1234</strong></span>
+                <button id="fillDemoBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" type="button">Fill</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script type="module" src="/static/js/auth_ui.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

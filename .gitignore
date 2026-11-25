@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data/app.db*
+data/.secret_key
+data/videos/*
+!data/videos/.gitkeep
+data/thumbnails/*
+!data/thumbnails/.gitkeep

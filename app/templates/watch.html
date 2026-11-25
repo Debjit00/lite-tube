@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Watch — LiteTube{% endblock %}
+
+{% block content %}
+<div id="watchRoot" class="watch-layout" data-video-id="{{ video_id }}">
+    <section id="watchPrimary">
+        <div class="player-shell">
+            <video id="videoPlayer" class="video-player" controls autoplay playsinline preload="metadata"></video>
+        </div>
+
+        <h1 id="watchTitle" class="watch-title">Loading video...</h1>
+
+        <div class="watch-channel-bar">
+            <div class="watch-channel-info">
+                <a id="watchChannelAvatarLink" href="/">
+                    <span id="watchChannelAvatar" class="avatar-circle lg">?</span>
+                </a>
+                <div>
+                    <a id="watchChannelName" class="watch-channel-name" href="/">Channel</a>
+                    <div id="watchChannelHandle" class="watch-channel-handle">@channel</div>
+                </div>
+            </div>
+
+            <div class="watch-actions">
+                <span id="watchViews" class="stat-pill">0 views</span>
+                <span id="watchCategoryPill" class="stat-pill">General</span>
+                <button id="deleteVideoBtn" class="btn btn-danger hidden" type="button">Delete Video</button>
+            </div>
+        </div>
+
+        <div class="description-card">
+            <div class="description-meta">
+                <span id="watchCreated">Just now</span>
+                <span id="watchFileSize"></span>
+            </div>
+            <p id="watchDescription" class="description-body"></p>
+            <div id="watchTags" class="tag-list"></div>
+        </div>
+    </section>
+
+    <aside class="up-next-column">
+        <h2 class="up-next-title">Up Next</h2>
+        <div id="relatedList" class="related-list"></div>
+    </aside>
+</div>
+
+<div id="watchNotFound" class="empty-state hidden">
+    <h3>Video not found</h3>
+    <p>This video may have been deleted or the URL is invalid.</p>
+    <a class="btn btn-primary" href="/">Back to Home</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/watch.js"></script>
+{% endblock %}
